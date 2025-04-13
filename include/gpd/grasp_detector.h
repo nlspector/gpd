@@ -53,6 +53,9 @@
 #include <gpd/util/config_file.h>
 #include <gpd/util/plot.h>
 
+// Eigen
+#include <Eigen/Dense>
+
 namespace gpd {
 
 /**
@@ -77,7 +80,7 @@ class GraspDetector {
    * \return list of grasps
    */
   std::vector<std::unique_ptr<candidate::Hand>> detectGrasps(
-      const util::Cloud &cloud);
+      const util::Cloud &cloud, const util::Cloud &stem_cloud);
 
   /**
    * \brief Preprocess the point cloud.
@@ -223,6 +226,9 @@ class GraspDetector {
 
   // selection parameters
   int num_selected_;  ///< the number of selected grasps
+
+  // Second gripper parameters
+  Eigen::Vector3d second_gripper_offset_;
 };
 
 }  // namespace gpd

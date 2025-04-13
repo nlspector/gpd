@@ -79,8 +79,13 @@ int DoMain(int argc, char *argv[]) {
     cloud.setNormals(cloud.getNormals() * (-1.0));
   }
 
-  // Detect grasp poses.
-  detector.detectGrasps(cloud);
+  // Detect grasps.
+  std::vector<std::unique_ptr<candidate::Hand>> grasps =
+      detector.detectGrasps(cloud, cloud);
+
+  if (grasps.size() > 0) {
+    printf("Detected %zu grasps.\n", grasps.size());
+  }
 
   return 0;
 }

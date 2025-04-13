@@ -22,6 +22,18 @@ std::vector<std::unique_ptr<cv::Mat>> Image12ChannelsStrategy::createImages(
   return images;
 }
 
+std::unique_ptr<cv::Mat> Image12ChannelsStrategy::createImage(
+    const candidate::Hand &hand,
+    const util::PointList &nn_points,
+    const Eigen::Matrix3Xd &shadow_points /* Ignored */) const {
+  // 1. Transform points and normals in neighborhood into the unit image.
+  Matrix3XdPair points_normals = transformToUnitImage(nn_points, hand);
+
+  // 2. Create grasp image.
+  // Return as unique_ptr to match the interface.
+  return std::make_unique<cv::Mat>(calculateImage(points_normals.first, points_normals.second));
+}
+
 void Image12ChannelsStrategy::createImage(const util::PointList &point_list,
                                           const candidate::Hand &hand,
                                           cv::Mat &image) const {

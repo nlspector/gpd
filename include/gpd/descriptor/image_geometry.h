@@ -81,6 +81,7 @@ class ImageGeometry {
   double height_;          ///< the height of the volume
   int size_;  ///< the size of the image (image is square: width = height)
   int num_channels_;  ///< the number of channels in the image
+  double shadow_length_; ///< length of shadow for shadow calculation
 };
 
 std::ostream &operator<<(std::ostream &stream,

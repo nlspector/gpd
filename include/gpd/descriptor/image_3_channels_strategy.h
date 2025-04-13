@@ -72,7 +72,19 @@ class Image3ChannelsStrategy : public ImageStrategy {
    */
   std::vector<std::unique_ptr<cv::Mat>> createImages(
       const candidate::HandSet &hand_set,
-      const util::PointList &nn_points) const;
+      const util::PointList &nn_points) const override;
+
+  /**
+   * \brief Create a grasp image given a single grasp candidate.
+   * \param hand the grasp candidate
+   * \param nn_points the point neighborhood used to calculate the image
+   * \param shadow_points the shadow points used to calculate the image
+   * \return the grasp image
+   */
+  std::unique_ptr<cv::Mat> createImage(
+      const candidate::Hand &hand,
+      const util::PointList &nn_points,
+      const Eigen::Matrix3Xd &shadow_points) const override;
 
  protected:
   void createImage(const util::PointList &point_list,

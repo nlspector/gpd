@@ -24,6 +24,26 @@ std::vector<std::unique_ptr<cv::Mat>> Image15ChannelsStrategy::createImages(
   return images;
 }
 
+std::unique_ptr<cv::Mat> Image15ChannelsStrategy::createImage(
+    const candidate::Hand &hand,
+    const util::PointList &nn_points,
+    const Eigen::Matrix3Xd &shadow_points) const {
+  // 1. Transform points and normals in neighborhood into the unit image.
+  Matrix3XdPair points_normals = transformToUnitImage(nn_points, hand);
+
+  // 2. Transform pre-calculated shadow points into hand frame.
+  Eigen::Matrix3Xd shadow_frame =
+      shadow_points - hand.getSample().replicate(1, shadow_points.cols());
+  shadow_frame = hand.getFrame().transpose() * shadow_frame;
+  std::vector<int> indices = findPointsInUnitImage(hand, shadow_frame);
+  Eigen::Matrix3Xd cropped_shadow_points =
+      transformPointsToUnitImage(hand, shadow_frame, indices);
+
+  // 3. Create grasp image.
+  return std::make_unique<cv::Mat>(calculateImage(points_normals.first, points_normals.second,
+                         cropped_shadow_points));
+}
+
 void Image15ChannelsStrategy::createImage(const util::PointList &point_list,
                                           const candidate::Hand &hand,
                                           const Eigen::Matrix3Xd &shadow,

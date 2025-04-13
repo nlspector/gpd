@@ -96,6 +96,16 @@ class ImageGenerator {
       std::vector<std::unique_ptr<candidate::Hand>> &hands_out) const;
 
   /**
+   * \brief Create a single grasp image for a given grasp candidate.
+   * \param cloud_cam the point cloud
+   * \param hand the grasp candidate
+   * \return the grasp image, or nullptr if creation fails
+   */
+  std::unique_ptr<cv::Mat> createImage(
+      const util::Cloud &cloud_cam,
+      const candidate::Hand &hand) const;
+
+  /**
    * \brief Return the parameters of the grasp image.
    * \return the grasp image parameters
    */

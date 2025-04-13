@@ -8,6 +8,7 @@ Hand::Hand() : grasp_width_(0.0), label_(0.0, false, false) {}
 Hand::Hand(const Eigen::Vector3d &sample, const Eigen::Matrix3d &frame,
            const FingerHand &finger_hand, double grasp_width)
     : sample_(sample), grasp_width_(grasp_width), label_(0.0, false, false) {
+  finger_hand_ = finger_hand;
   orientation_ = frame;
 
   construct(finger_hand);
@@ -16,12 +17,14 @@ Hand::Hand(const Eigen::Vector3d &sample, const Eigen::Matrix3d &frame,
 Hand::Hand(const Eigen::Vector3d &sample, const Eigen::Matrix3d &frame,
            const FingerHand &finger_hand)
     : sample_(sample), grasp_width_(0.0), label_(0.0, false, false) {
+  finger_hand_ = finger_hand;
   orientation_ = frame;
 
   construct(finger_hand);
 }
 
 void Hand::construct(const FingerHand &finger_hand) {
+  finger_hand_ = finger_hand;
   closing_box_.top_ = finger_hand.getTop();
   closing_box_.bottom_ = finger_hand.getBottom();
   closing_box_.center_ = finger_hand.getCenter();
@@ -83,6 +86,14 @@ std::string Hand::vectorToString(const Eigen::VectorXd &v) const {
     s += std::to_string(v(i)) + ",";
   }
   return s;
+}
+
+const FingerHand& Hand::getFingerHand() const {
+    return finger_hand_;
+}
+
+void Hand::setSample(const Eigen::Vector3d& sample) {
+    sample_ = sample;
 }
 
 }  // namespace candidate

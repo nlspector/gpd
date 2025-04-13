@@ -22,6 +22,28 @@ std::vector<std::unique_ptr<cv::Mat>> Image3ChannelsStrategy::createImages(
   return images;
 }
 
+std::unique_ptr<cv::Mat> Image3ChannelsStrategy::createImage(
+    const candidate::Hand &hand,
+    const util::PointList &nn_points,
+    const Eigen::Matrix3Xd &shadow_points /* Ignored */) const {
+
+  // 1. Transform points and normals in neighborhood into the unit image.
+  Matrix3XdPair points_normals = transformToUnitImage(nn_points, hand);
+
+  // 2. Calculate grasp image.
+  Eigen::VectorXi cell_indices = findCellIndices(points_normals.first);
+  cv::Mat image = createNormalsImage(points_normals.second, cell_indices);
+
+  if (is_plotting_) {
+    std::string title = "Grasp Image (3 channels)";
+    cv::namedWindow(title, cv::WINDOW_NORMAL);
+    cv::imshow(title, image);
+    cv::waitKey(0);
+  }
+
+  return std::make_unique<cv::Mat>(image);
+}
+
 void Image3ChannelsStrategy::createImage(const util::PointList &point_list,
                                          const candidate::Hand &hand,
                                          cv::Mat &image) const {

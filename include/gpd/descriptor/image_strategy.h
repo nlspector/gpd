@@ -96,6 +96,18 @@ class ImageStrategy {
       const util::PointList &nn_points) const = 0;
 
   /**
+   * \brief Create a grasp image given a single grasp candidate.
+   * \param hand the grasp candidate
+   * \param nn_points the point neighborhood used to calculate the image
+   * \param shadow_points the pre-calculated shadow points (needed by some strategies)
+   * \return the grasp image
+   */
+  virtual std::unique_ptr<cv::Mat> createImage(
+      const candidate::Hand &hand,
+      const util::PointList &nn_points,
+      const Eigen::Matrix3Xd &shadow_points) const = 0;
+
+  /**
    * \brief Return the grasp image parameters.
    * \return the grasp image parameters
    */

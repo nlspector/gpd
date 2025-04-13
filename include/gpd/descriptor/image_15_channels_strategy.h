@@ -66,7 +66,8 @@ class Image15ChannelsStrategy : public ImageStrategy {
   Image15ChannelsStrategy(const ImageGeometry &image_params, int num_threads,
                           int num_orientations, bool is_plotting)
       : ImageStrategy(image_params, num_threads, num_orientations,
-                      is_plotting) {
+                      is_plotting),
+        shadow_length_(image_params.shadow_length_) {
     // Calculate shadow length (= max length of shadow required to fill image
     // window).
     Eigen::Vector3d image_dims;
@@ -84,6 +85,18 @@ class Image15ChannelsStrategy : public ImageStrategy {
   std::vector<std::unique_ptr<cv::Mat>> createImages(
       const candidate::HandSet &hand_set,
       const util::PointList &nn_points) const;
+
+  /**
+   * \brief Create a grasp image given a grasp candidate and its point neighborhoods.
+   * \param hand the grasp candidate
+   * \param nn_points the point neighborhoods used to calculate the image
+   * \param shadow_points the shadow points used to calculate the image
+   * \return the grasp image
+   */
+  std::unique_ptr<cv::Mat> createImage(
+      const candidate::Hand &hand,
+      const util::PointList &nn_points,
+      const Eigen::Matrix3Xd &shadow_points) const override;
 
  protected:
   void createImage(const util::PointList &point_list,

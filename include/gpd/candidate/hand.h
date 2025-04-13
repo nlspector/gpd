@@ -249,7 +249,22 @@ class Hand {
    */
   int getFingerPlacementIndex() const { return finger_placement_index_; }
 
+  /**
+   * \brief Return the FingerHand object used to construct this hand.
+   * \return const reference to the FingerHand object
+   */
+  const FingerHand& getFingerHand() const;
+
+  /**
+   * \brief Set the sample point associated with the hand.
+   * \param sample The 3D sample point.
+   */
+  void setSample(const Eigen::Vector3d& sample);
+
  private:
+  // Store the FingerHand object used for construction
+  FingerHand finger_hand_;
+
   /**
    * \brief Calculate grasp positions (bottom, top, surface).
    * \param finger_hand the FingerHand object describing a feasible finger

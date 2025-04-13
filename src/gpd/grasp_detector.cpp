@@ -1,4 +1,8 @@
 #include <gpd/grasp_detector.h>
+#include <gpd/util/plot.h>
+
+#include <omp.h>
+#include <Eigen/Dense>
 
 namespace gpd {
 
@@ -184,13 +188,18 @@ GraspDetector::GraspDetector(const std::string &config_filename) {
   // Read grasp selection parameters.
   num_selected_ = config_file.getValueOfKey<int>("num_selected", 100);
 
+  // Read second gripper parameters
+  second_gripper_offset_.x() = config_file.getValueOfKey<double>("second_gripper_translation_x", 0.0);
+  second_gripper_offset_.y() = config_file.getValueOfKey<double>("second_gripper_translation_y", 0.0);
+  second_gripper_offset_.z() = config_file.getValueOfKey<double>("second_gripper_translation_z", 0.0);
+
   // Create plotter.
   plotter_ = std::make_unique<util::Plot>(hand_search_params.hand_axes_.size(),
                                           hand_search_params.num_orientations_);
 }
 
 std::vector<std::unique_ptr<candidate::Hand>> GraspDetector::detectGrasps(
-    const util::Cloud &cloud) {
+    const util::Cloud &cloud, const util::Cloud &stem_cloud) {
   double t0_total = omp_get_wtime();
   std::vector<std::unique_ptr<candidate::Hand>> hands_out;
 
@@ -219,11 +228,11 @@ std::vector<std::unique_ptr<candidate::Hand>> GraspDetector::detectGrasps(
     plotter_->plotNormals(cloud);
   }
 
-  // 1. Generate grasp candidates.
+  // 1. Generate grasp candidates on the primary cloud.
   double t0_candidates = omp_get_wtime();
   std::vector<std::unique_ptr<candidate::HandSet>> hand_set_list =
       candidates_generator_->generateGraspCandidateSets(cloud);
-  printf("Generated %zu hand sets.\n", hand_set_list.size());
+  printf("Generated %zu primary hand sets.\n", hand_set_list.size());
   if (hand_set_list.size() == 0) {
     return hands_out;
   }
@@ -233,7 +242,7 @@ std::vector<std::unique_ptr<candidate::Hand>> GraspDetector::detectGrasps(
                             "Grasp candidates", hand_geom);
   }
 
-  // 2. Filter the candidates.
+  // 2. Filter the primary candidates.
   double t0_filter = omp_get_wtime();
   std::vector<std::unique_ptr<candidate::HandSet>> hand_set_list_filtered =
       filterGraspsWorkspace(hand_set_list, workspace_grasps_);
@@ -257,29 +266,122 @@ std::vector<std::unique_ptr<candidate::Hand>> GraspDetector::detectGrasps(
     return hands_out;
   }
 
-  // 3. Create grasp descriptors (images).
+  // 3. Create grasp descriptors (images) for primary hands.
   double t0_images = omp_get_wtime();
   std::vector<std::unique_ptr<candidate::Hand>> hands;
-  std::vector<std::unique_ptr<cv::Mat>> images;
-  image_generator_->createImages(cloud, hand_set_list_filtered, images, hands);
+  std::vector<std::unique_ptr<cv::Mat>> primary_images;
+  image_generator_->createImages(cloud, hand_set_list_filtered, primary_images, hands);
   double t_images = omp_get_wtime() - t0_images;
 
-  // 4. Classify the grasp candidates.
-  double t0_classify = omp_get_wtime();
-  std::vector<float> scores = classifier_->classifyImages(images);
-  for (int i = 0; i < hands.size(); i++) {
-    hands[i]->setScore(scores[i]);
+  if (hands.empty()) {
+      printf("No valid primary hands found after image generation.\n");
+      return hands_out;
   }
+
+  // 4. Classify the primary grasp candidates.
+  double t0_classify = omp_get_wtime();
+  std::vector<float> primary_scores = classifier_->classifyImages(primary_images);
   double t_classify = omp_get_wtime() - t0_classify;
 
-  // 5. Select the <num_selected> highest scoring grasps.
+  // 5. Evaluate stem grasps and calculate average scores.
+  double t0_stem_eval = omp_get_wtime();
+
+  // ---> Preprocess the stem cloud <--- 
+  util::Cloud processed_stem_cloud = stem_cloud; // Create a mutable copy
+  candidates_generator_->preprocessPointCloud(processed_stem_cloud);
+  printf("Preprocessed stem cloud (%zu points remaining).\n", processed_stem_cloud.getCloudProcessed()->size());
+  // Check if stem cloud is valid after processing
+  if (processed_stem_cloud.getCloudProcessed()->empty()) {
+      printf("Warning: Stem cloud is empty after preprocessing. Cannot evaluate stem grasps.\n");
+      // Handle this case: perhaps return only primary grasps or empty list?
+      // For now, continue but expect no stem images/scores.
+      hands.clear(); // Clear hands as we can't calculate averaged scores
+  }
+  // <--- End stem cloud preprocessing --->
+
+  std::vector<float> final_scores;
+  final_scores.reserve(hands.size());
+
+  // Prepare for batch processing of stem images if single image classification isn't efficient/available
+  std::vector<std::unique_ptr<cv::Mat>> stem_images;
+  std::vector<int> valid_hand_indices; // Keep track of hands for which stem images could be generated
+  stem_images.reserve(hands.size());
+  valid_hand_indices.reserve(hands.size());
+
+  for (int i = 0; i < hands.size(); ++i) {
+      const auto& primary_hand = hands[i];
+
+      // Calculate stem hand pose
+      Eigen::Matrix3d stem_orientation = primary_hand->getOrientation(); // Keep same orientation
+
+      // Create a Hand object for the stem pose using primary hand's geometry/finger info.
+      // The actual position will be implicitly handled by the image generation using the stem cloud
+      // and the primary hand's sample point, combined with the offset applied during evaluation.
+      // We use a valid constructor that takes sample, frame, and FingerHand.
+      candidate::Hand stem_hand(primary_hand->getSample(), // Use primary sample initially
+                                stem_orientation,        // Stem orientation
+                                primary_hand->getFingerHand()); // Re-use primary FingerHand geometry
+
+      // ---> Set the correct sample point incorporating the offset <--- 
+      stem_hand.setSample(primary_hand->getSample() + primary_hand->getOrientation() * second_gripper_offset_);
+
+      // Set the score to 0 initially (or keep existing constructor's default)
+      stem_hand.setScore(0.0f);
+      // NOTE: We don't explicitly set the stem_hand position, as it's not directly used by
+      // createImage, which relies on the sample + orientation + cloud data.
+      // The offset is handled conceptually by using stem_cloud with primary_hand's sample reference.
+
+      // Generate image for the stem hand using the *processed* stem_cloud.
+      std::unique_ptr<cv::Mat> stem_image = image_generator_->createImage(cloud, stem_hand);
+
+      if (stem_image && !stem_image->empty()) {
+          stem_images.push_back(std::move(stem_image));
+          valid_hand_indices.push_back(i); // Store index of the original hand
+      }
+      // If stem image creation fails, we might skip this hand or assign a default low score.
+      // For now, we just won't have a stem score for it.
+  }
+
+  std::vector<float> stem_scores;
+  if (!stem_images.empty()) {
+     stem_scores = classifier_->classifyImages(stem_images);
+  }
+
+  std::vector<std::unique_ptr<candidate::Hand>> valid_hands; // New list for hands with valid avg scores
+  valid_hands.reserve(valid_hand_indices.size());
+
+  for (int j = 0; j < valid_hand_indices.size(); ++j) {
+      int original_index = valid_hand_indices[j];
+      float primary_score = primary_scores[original_index];
+      float stem_score = stem_scores[j]; // Scores correspond to the order of stem_images
+
+      float final_score = (primary_score + stem_score) / 2.0f;
+      printf("primary_score: %f, stem_score: %f, final_score: %f\n", primary_score, stem_score, final_score);
+
+      hands[original_index]->setScore(final_score);
+      valid_hands.push_back(std::move(hands[original_index])); // Move hand to the valid list
+  }
+
+  // Replace original hands list with the list of hands that have valid averaged scores
+  hands = std::move(valid_hands);
+  double t_stem_eval = omp_get_wtime() - t0_stem_eval;
+
+  if (hands.empty()) {
+      printf("No hands remained after stem evaluation and averaging.\n");
+      return hands_out;
+  }
+
+  printf("Evaluated stem grasps and calculated average scores for %zu hands.\n", hands.size());
+
+  // 6. Select the <num_selected> highest scoring grasps (using averaged scores).
   hands = selectGrasps(hands);
   if (plot_valid_grasps_) {
-    plotter_->plotFingers3D(hands, cloud.getCloudOriginal(), "Valid Grasps",
+    // Plotting might need adjustment if we want to show both grippers
+    plotter_->plotFingers3D(hands, cloud.getCloudOriginal(), "Valid Grasps (Avg Score)",
                             hand_geom);
   }
 
-  // 6. Cluster the grasps.
+  // 7. Cluster the grasps (using averaged scores).
   double t0_cluster = omp_get_wtime();
   std::vector<std::unique_ptr<candidate::Hand>> clusters;
   if (cluster_grasps_) {
@@ -301,7 +403,7 @@ std::vector<std::unique_ptr<candidate::Hand>> GraspDetector::detectGrasps(
   }
   double t_cluster = omp_get_wtime() - t0_cluster;
 
-  // 7. Sort grasps by their score.
+  // 8. Sort grasps by their averaged score.
   std::sort(clusters.begin(), clusters.end(), isScoreGreater);
   printf("======== Selected grasps ========\n");
   for (int i = 0; i < clusters.size(); i++) {
@@ -312,8 +414,9 @@ std::vector<std::unique_ptr<candidate::Hand>> GraspDetector::detectGrasps(
 
   printf("======== RUNTIMES ========\n");
   printf(" 1. Candidate generation: %3.4fs\n", t_candidates);
-  printf(" 2. Descriptor extraction: %3.4fs\n", t_images);
-  printf(" 3. Classification: %3.4fs\n", t_classify);
+  printf(" 2. Primary descriptor extraction: %3.4fs\n", t_images);
+  printf(" 3. Primary classification: %3.4fs\n", t_classify);
+  printf(" 4. Stem evaluation (img+classify): %3.4fs\n", t_stem_eval);
   // printf(" Filtering: %3.4fs\n", t_filter);
   // printf(" Clustering: %3.4fs\n", t_cluster);
   printf("==========\n");
