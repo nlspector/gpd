@@ -88,6 +88,7 @@ public:
   ~GraspDetectorGPD()
   {
     delete cloud_camera_;
+    delete stem_cloud_camera_;
 
     // todo stop and delete threads
   }
@@ -109,6 +110,13 @@ private:
    * \param msg the incoming ROS message
    */
   void cloud_callback(const sensor_msgs::msg::PointCloud2::SharedPtr msg);
+
+  /**
+   * \brief Callback function for the ROS topic that contains the stem point cloud.
+   * \param msg the incoming ROS message
+   */
+  void stem_cloud_callback(const sensor_msgs::msg::PointCloud2::SharedPtr msg);
+
 #ifdef RECOGNIZE_PICK
   /**
    * \brief Callback function for the ROS topic that contains the detected and segmented objects
@@ -189,9 +197,11 @@ private:
   /** individual parameters for grasp detection */
   /** stores point cloud with (optional) camera information and surface normals*/
   gpd::util::Cloud * cloud_camera_;
+  gpd::util::Cloud * stem_cloud_camera_;
   std_msgs::msg::Header cloud_camera_header_; /**< stores header of the point cloud*/
   /** status variables for received (input) messages*/
   bool has_cloud_;
+  bool has_stem_cloud_;
   std::string frame_; /**< point cloud frame*/
   bool auto_mode_; /**< grasp detection mode*/
   bool plane_remove_; /**< whether enable object detection>*/
@@ -203,8 +213,11 @@ private:
 
   rclcpp::CallbackGroup::SharedPtr callback_group_subscriber1_;
   rclcpp::CallbackGroup::SharedPtr callback_group_subscriber2_;
+  rclcpp::CallbackGroup::SharedPtr callback_group_subscriber3_;
   /** ROS2 subscriber for point cloud messages*/
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr cloud_sub_;
+  /** ROS2 subscriber for stem point cloud messages*/
+  rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr stem_cloud_sub_;
 #ifdef RECOGNIZE_PICK
   /** ROS2 subscriber for object  messages*/
   rclcpp::Subscription<people_msgs::msg::ObjectsInMasks>::SharedPtr object_sub_;

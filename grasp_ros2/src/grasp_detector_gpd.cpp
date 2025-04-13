@@ -32,6 +32,8 @@ GraspDetectorGPD::GraspDetectorGPD(const rclcpp::NodeOptions & options)
 : GraspDetectorBase(),
   cloud_camera_(nullptr),
   has_cloud_(false),
+  stem_cloud_camera_(nullptr),
+  has_stem_cloud_(false),
   frame_(""),
 #ifdef RECOGNIZE_PICK
   object_msg_(nullptr), object_sub_(nullptr),
@@ -70,8 +72,10 @@ void GraspDetectorGPD::initializeROSComponents()
     std::vector<double>(std::initializer_list<double>({0, 0, 0})));
   view_point_ << camera_position[0], camera_position[1], camera_position[2];
   this->get_parameter_or("auto_mode", auto_mode_, true);
-  std::string cloud_topic, object_topic;
+  std::string cloud_topic, stem_cloud_topic, object_topic;
   this->get_parameter_or("cloud_topic", cloud_topic,
+    std::string(Consts::kTopicPointCloud2));
+  this->get_parameter_or("stem_cloud_topic", stem_cloud_topic,
     std::string(Consts::kTopicPointCloud2));
   bool rviz, object_detect;
   this->get_parameter_or("rviz", rviz, false);
@@ -83,12 +87,24 @@ void GraspDetectorGPD::initializeROSComponents()
   auto sub1_opt = rclcpp::SubscriptionOptions();
   sub1_opt.callback_group = callback_group_subscriber1_;
 
-  auto callback = [this](const sensor_msgs::msg::PointCloud2::SharedPtr msg) -> void {
+  auto cloud_cb = [this](const sensor_msgs::msg::PointCloud2::SharedPtr msg) -> void {
       this->cloud_callback(msg);
     };
   cloud_sub_ =
     this->create_subscription<sensor_msgs::msg::PointCloud2>(cloud_topic,
-      rclcpp::QoS(10), callback, sub1_opt);
+      rclcpp::QoS(10), cloud_cb, sub1_opt);
+
+  callback_group_subscriber3_ = this->create_callback_group(
+    rclcpp::CallbackGroupType::MutuallyExclusive);
+  auto sub3_opt = rclcpp::SubscriptionOptions();
+  sub3_opt.callback_group = callback_group_subscriber3_;
+
+  auto stem_cloud_cb = [this](const sensor_msgs::msg::PointCloud2::SharedPtr msg) -> void {
+      this->stem_cloud_callback(msg);
+    };
+  stem_cloud_sub_ =
+    this->create_subscription<sensor_msgs::msg::PointCloud2>(stem_cloud_topic,
+      rclcpp::QoS(10), stem_cloud_cb, sub3_opt);
 
   grasps_pub_ = this->create_publisher<grasp_msgs::msg::GraspConfigList>(
     Consts::kTopicDetectedGrasps, 10);
@@ -107,12 +123,12 @@ void GraspDetectorGPD::initializeROSComponents()
 
     this->get_parameter_or("object_topic", object_topic,
       std::string(Consts::kTopicDetectedObjects));
-    auto callback = [this](const people_msgs::msg::ObjectsInMasks::SharedPtr msg) -> void {
+    auto object_cb = [this](const people_msgs::msg::ObjectsInMasks::SharedPtr msg) -> void {
         this->object_callback(msg);
       };
     object_sub_ =
       this->create_subscription<people_msgs::msg::ObjectsInMasks>(object_topic,
-        rclcpp::QoS(10), callback, sub2_opt);
+        rclcpp::QoS(10), object_cb, sub2_opt);
   }
 #endif
   RCLCPP_INFO(get_logger(), "ROS2 Grasp Library node up...");
@@ -124,17 +140,17 @@ void GraspDetectorGPD::initializeROSComponents()
 void GraspDetectorGPD::onInit()
 {
   rclcpp::Rate rate(100);
-  RCLCPP_INFO(logger_, "Waiting for point cloud to arrive ...");
+  RCLCPP_INFO(logger_, "Waiting for point cloud and stem cloud to arrive ...");
 
   while (rclcpp::ok()) {
-    if (has_cloud_) {
+    if (has_cloud_ && has_stem_cloud_) {
       // detect grasps in point cloud
       std::vector<std::unique_ptr<gpd::candidate::Hand>> grasps = detectGraspPosesInTopic();
       // visualize grasps in rviz
       if (grasps_rviz_pub_) {
         // Get hand geometry parameters
         if (grasps.size() > 0) {
-          grasps_rviz_pub_->publish(convertToVisualGraspMsg(grasps, 
+          grasps_rviz_pub_->publish(convertToVisualGraspMsg(grasps,
               hand_geometry_.outer_diameter_, hand_geometry_.depth_,
               hand_geometry_.finger_width_, hand_geometry_.height_, frame_));
         }
@@ -142,7 +158,8 @@ void GraspDetectorGPD::onInit()
 
       // reset the system
       has_cloud_ = false;
-      RCLCPP_INFO(logger_, "Waiting for point cloud to arrive ...");
+      has_stem_cloud_ = false;
+      RCLCPP_INFO(logger_, "Waiting for point cloud and stem cloud to arrive ...");
     }
 
     // rclcpp::spin(shared_from_this());
@@ -162,21 +179,27 @@ std::vector<std::unique_ptr<gpd::candidate::Hand>> GraspDetectorGPD::detectGrasp
     }
 
     if (!cloud_camera_) {
-      RCLCPP_ERROR(logger_, "No point cloud data available");
+      RCLCPP_ERROR(logger_, "No primary point cloud data available");
+      return grasps;
+    }
+    if (!stem_cloud_camera_) {
+      RCLCPP_ERROR(logger_, "No stem point cloud data available");
       return grasps;
     }
 
-    // preprocess the point cloud with error handling
+    // Preprocessing might need adjustment if stem cloud needs specific preprocessing
+    // For now, assume only primary cloud needs GPD's preprocess.
     try {
       grasp_detector_->preprocessPointCloud(*cloud_camera_);
+      grasp_detector_->preprocessPointCloud(*stem_cloud_camera_);
     } catch (const std::exception& e) {
-      RCLCPP_ERROR(logger_, "Error preprocessing point cloud: %s", e.what());
+      RCLCPP_ERROR(logger_, "Error preprocessing primary point cloud: %s", e.what());
       return grasps;
     }
 
     // detect grasps in the point cloud with error handling
     try {
-      grasps = grasp_detector_->detectGrasps(*cloud_camera_);
+      grasps = grasp_detector_->detectGrasps(*cloud_camera_, *stem_cloud_camera_);
     } catch (const std::exception& e) {
       RCLCPP_ERROR(logger_, "Error detecting grasps: %s", e.what());
       return grasps;
@@ -219,7 +242,7 @@ void GraspDetectorGPD::cloud_callback(const sensor_msgs::msg::PointCloud2::Share
     }
   }
 #endif
-  RCLCPP_DEBUG(get_logger(), "PCD callback...");
+  RCLCPP_DEBUG(get_logger(), "Primary PCD callback...");
   if (!has_cloud_) {
     delete cloud_camera_;
     cloud_camera_ = nullptr;
@@ -239,10 +262,7 @@ void GraspDetectorGPD::cloud_callback(const sensor_msgs::msg::PointCloud2::Share
       pcl::fromROSMsg(*msg, *cloud);
 
       // filter workspace
-      // Use hand geometry parameters for workspace filtering
-      // Define default workspace if not set
       std::vector<double> workspace = {-1.0, 1.0, -1.0, 1.0, -1.0, 1.0};
-
       for (uint32_t i = 0; i < cloud->size(); i++) {
         if (cloud->points[i].x > workspace[0] && cloud->points[i].x < workspace[1] &&
             cloud->points[i].y > workspace[2] && cloud->points[i].y < workspace[3] &&
@@ -315,7 +335,6 @@ void GraspDetectorGPD::cloud_callback(const sensor_msgs::msg::PointCloud2::Share
       if (filtered_pub_) {
         sensor_msgs::msg::PointCloud2 msg2;
         pcl::toROSMsg(*cloud, msg2);
-        // workaround rviz rgba
         msg2.fields[3].name = "rgb";
         msg2.fields[3].datatype = 7;
         filtered_pub_->publish(msg2);
@@ -323,17 +342,46 @@ void GraspDetectorGPD::cloud_callback(const sensor_msgs::msg::PointCloud2::Share
       cloud_camera_ = new gpd::util::Cloud(cloud, 0, view_points);
       cloud_camera_header_ = msg->header;
     }
-    RCLCPP_INFO(logger_, "Received cloud with %zu points and normals.",
+    RCLCPP_INFO(logger_, "Received primary cloud with %zu points and normals.",
       cloud_camera_->getCloudProcessed()->size());
 
     has_cloud_ = true;
     frame_ = msg->header.frame_id;
   }
 }
+
+void GraspDetectorGPD::stem_cloud_callback(const sensor_msgs::msg::PointCloud2::SharedPtr msg)
+{
+   if (!auto_mode_ && !started_) {return;}
+
+   RCLCPP_DEBUG(get_logger(), "Stem PCD callback...");
+   if (!has_stem_cloud_) {
+     delete stem_cloud_camera_;
+     stem_cloud_camera_ = nullptr;
+     Eigen::Matrix3Xd view_points(3, 1);
+     view_points.col(0) = view_point_;
+
+     PointCloudRGBA::Ptr cloud(new PointCloudRGBA);
+     try {
+        pcl::fromROSMsg(*msg, *cloud);
+     } catch (const std::runtime_error& e) {
+        RCLCPP_ERROR(logger_, "Failed to convert stem cloud ROS message to PCL: %s", e.what());
+        return;
+     }
+
+     stem_cloud_camera_ = new gpd::util::Cloud(cloud, 0, view_points);
+
+     RCLCPP_INFO(logger_, "Received stem cloud with %zu points.",
+       stem_cloud_camera_->getCloudProcessed()->size());
+
+     has_stem_cloud_ = true;
+   }
+}
+
 #ifdef RECOGNIZE_PICK
 void GraspDetectorGPD::object_callback(const people_msgs::msg::ObjectsInMasks::SharedPtr msg)
 {
-  RCLCPP_INFO(logger_, "Object callback *************************[%d]", msg->objects_vector.size());
+  RCLCPP_INFO(logger_, "Object callback received %zu objects", msg->objects_vector.size());
   for (auto obj : msg->objects_vector) {
     RCLCPP_INFO(logger_, "obj name %s prob %f roi[%d %d %d %d]",
       obj.object_name.c_str(), obj.probability,
@@ -353,6 +401,7 @@ void GraspDetectorGPD::object_callback(const people_msgs::msg::ObjectsInMasks::S
   }
 }
 #endif
+
 grasp_msgs::msg::GraspConfigList GraspDetectorGPD::createGraspListMsg(
   const std::vector<std::unique_ptr<gpd::candidate::Hand>> & hands)
 {
