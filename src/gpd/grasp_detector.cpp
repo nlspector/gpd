@@ -356,7 +356,7 @@ std::vector<std::unique_ptr<candidate::Hand>> GraspDetector::detectGrasps(
       float primary_score = primary_scores[original_index];
       float stem_score = stem_scores[j]; // Scores correspond to the order of stem_images
 
-      float final_score = (primary_score);
+      float final_score = (primary_score + stem_score) / 2.0f;
 
       hands[original_index]->setScore(final_score);
       valid_hands.push_back(std::move(hands[original_index])); // Move hand to the valid list
