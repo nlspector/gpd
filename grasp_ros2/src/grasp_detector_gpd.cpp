@@ -75,8 +75,10 @@ void GraspDetectorGPD::initializeROSComponents()
   std::string cloud_topic, stem_cloud_topic, object_topic;
   this->get_parameter_or("cloud_topic", cloud_topic,
     std::string(Consts::kTopicPointCloud2));
+  RCLCPP_INFO(this->get_logger(), "Using cloud topic: %s", cloud_topic.c_str());
   this->get_parameter_or("stem_cloud_topic", stem_cloud_topic,
-    std::string(Consts::kTopicPointCloud2));
+    std::string("/segmenter/stem_cloud"));
+  RCLCPP_INFO(this->get_logger(), "Using stem cloud topic: %s", stem_cloud_topic.c_str());
   bool rviz, object_detect;
   this->get_parameter_or("rviz", rviz, false);
   this->get_parameter_or("plane_remove", plane_remove_, false);

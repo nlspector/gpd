@@ -3,6 +3,8 @@ grasp_detector_gpd:
     # Point cloud input
     #cloud_topic: /camera/camera/depth/color/points
     #cloud_topic: /mechmind/color_point_cloud
+    cloud_topic: /segmenter/segmented_pointcloud
+    stem_cloud_topic: /segmenter/stem_cloud
     rviz: true
     device: 0  # 0:CPU, 1:GPU, 2:VPU
     #auto_mode: true
