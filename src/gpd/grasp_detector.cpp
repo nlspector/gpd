@@ -192,6 +192,7 @@ GraspDetector::GraspDetector(const std::string &config_filename) {
   second_gripper_offset_.x() = config_file.getValueOfKey<double>("second_gripper_translation_x", 0.0);
   second_gripper_offset_.y() = config_file.getValueOfKey<double>("second_gripper_translation_y", 0.0);
   second_gripper_offset_.z() = config_file.getValueOfKey<double>("second_gripper_translation_z", 0.0);
+  printf("second_gripper_offset: %3.4f, %3.4f, %3.4f\n", second_gripper_offset_.x(), second_gripper_offset_.y(), second_gripper_offset_.z());
 
   // Create plotter.
   plotter_ = std::make_unique<util::Plot>(hand_search_params.hand_axes_.size(),
@@ -355,8 +356,7 @@ std::vector<std::unique_ptr<candidate::Hand>> GraspDetector::detectGrasps(
       float primary_score = primary_scores[original_index];
       float stem_score = stem_scores[j]; // Scores correspond to the order of stem_images
 
-      float final_score = (primary_score + stem_score) / 2.0f;
-      printf("primary_score: %f, stem_score: %f, final_score: %f\n", primary_score, stem_score, final_score);
+      float final_score = (primary_score);
 
       hands[original_index]->setScore(final_score);
       valid_hands.push_back(std::move(hands[original_index])); // Move hand to the valid list
@@ -423,8 +423,36 @@ std::vector<std::unique_ptr<candidate::Hand>> GraspDetector::detectGrasps(
   printf(" TOTAL: %3.4fs\n", t_total);
 
   if (plot_selected_grasps_) {
-    plotter_->plotFingers3D(clusters, cloud.getCloudOriginal(),
-                            "Selected Grasps", hand_geom, false);
+    // Create a combined list of primary and secondary hands for plotting
+    std::vector<std::unique_ptr<candidate::Hand>> hands_to_plot;
+    hands_to_plot.reserve(clusters.size() * 2); 
+
+    for (const auto& primary_hand_ptr : clusters) {
+      // Add a copy of the primary hand
+      hands_to_plot.push_back(std::make_unique<candidate::Hand>(*primary_hand_ptr));
+
+      // Calculate the secondary hand's sample position (relative offset)
+      Eigen::Vector3d secondary_sample = primary_hand_ptr->getSample() + 
+                                        primary_hand_ptr->getOrientation() * second_gripper_offset_;
+
+      // print the delta between the primary and secondary sample
+      printf("delta (%3.4f): %3.4f, %3.4f, %3.4f\n", (secondary_sample - primary_hand_ptr->getSample()).norm(), 
+             (secondary_sample - primary_hand_ptr->getSample()).x(), 
+             (secondary_sample - primary_hand_ptr->getSample()).y(), 
+             (secondary_sample - primary_hand_ptr->getSample()).z());
+
+      // Create the secondary hand using the calculated secondary sample directly
+      auto secondary_hand = std::make_unique<candidate::Hand>(
+                               secondary_sample, // Use the calculated offset sample
+                               primary_hand_ptr->getOrientation(), 
+                               primary_hand_ptr->getFingerHand()); 
+      secondary_hand->setScore(primary_hand_ptr->getScore()); // Copy score for consistency if needed
+
+      hands_to_plot.push_back(std::move(secondary_hand));
+    }
+
+    plotter_->plotFingers3D(hands_to_plot, cloud.getCloudOriginal(),
+                            "Selected Grasps (Primary + Secondary Offset)", hand_geom, false);
   }
 
   return clusters;
