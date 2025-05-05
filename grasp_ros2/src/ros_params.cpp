@@ -178,8 +178,8 @@ void ROSParameters::getPlanningParams(
   GraspPlanner::GraspPlanningParameters & param)
 {
   node->get_parameter_or("grasp_service_timeout", param.grasp_service_timeout_, 0);
-  node->get_parameter_or("grasp_score_threshold", param.grasp_score_threshold_, 200);
-  node->get_parameter_or("grasp_frame_id", param.grasp_frame_id_, std::string("base"));
+  node->get_parameter_or("grasp_score_threshold", param.grasp_score_threshold_, 100);
+  node->get_parameter_or("grasp_frame_id", param.grasp_frame_id_, std::string("camera_depth_optical_frame"));
   std::vector<double> approach;
   node->get_parameter_or("grasp_approach", approach,
     std::vector<double>(std::initializer_list<double>({0.0, 0.0, -1.0})));

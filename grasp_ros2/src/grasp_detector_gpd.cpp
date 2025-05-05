@@ -84,6 +84,9 @@ void GraspDetectorGPD::initializeROSComponents()
   this->get_parameter_or("plane_remove", plane_remove_, false);
   this->get_parameter_or("object_detect", object_detect, false);
 
+  // Log the value of rviz parameter read from the file
+  RCLCPP_INFO(this->get_logger(), "RViz parameter read as: %s", rviz ? "true" : "false");
+
   callback_group_subscriber1_ = this->create_callback_group(
     rclcpp::CallbackGroupType::MutuallyExclusive);
   auto sub1_opt = rclcpp::SubscriptionOptions();
